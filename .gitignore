@@ -1,0 +1,5 @@
+node_modules/
+secrets.json
+ui/public/build/
+
+.DS_Store
