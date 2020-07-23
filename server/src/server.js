@@ -7,12 +7,19 @@ import jwt from 'jsonwebtoken';
 import morgan from 'morgan';
 import nodemailer from 'nodemailer';
 import secrets from '../../secrets.json';
-import {v4 as uuidv4} from 'uuid';
 
 const JWT_EXPIRY_SECONDS = 5 * 60;
+const UNPROTECTED_ROUTES = [
+  {method: 'GET', url: '/account'},
+  {method: 'POST', url: '/account'},
+  {method: 'POST', url: '/login'},
+  {method: 'POST', url: '/password'} // uses token in query parameter
+];
 
-const codeToEmail = {};
+// These can't just be held in memory if this will be deployed
+// to multiple servers that are selected by a load balancer.
 const emailToAccount = {};
+const tokenToEmail = {};
 const usernameToAccount = {};
 
 // For nodemailer ...
@@ -31,6 +38,35 @@ app.use(cookieParser());
 app.use(express.static('public'));
 app.use(express.json()); // for JSON body parsing
 app.use(express.text()); // for text body parsing
+
+// This custom middleware verifies that requests to protected routes
+// include a valid JWT.
+app.use((req, res, next) => {
+  const {method, url} = req;
+  const route = UNPROTECTED_ROUTES.find(
+    route => route.method === method && route.url === url
+  );
+  if (route) return next();
+
+  // Verify the JWT token.
+
+  const {username} = req.body;
+  const {token} = req.cookies;
+  console.log('server.js middleware: token =', token);
+  if (!token) return res.status(401).end();
+
+  try {
+    // This parses the JWT string.  It will throw if
+    // the token has expired or the signature does not match.
+    const payload = jwt.verify(token, secrets.jwtKey);
+    const valid = username ? payload.username === username : true;
+    if (!valid) throw new Error('invalid token');
+    next();
+  } catch (e) {
+    const status = e instanceof jwt.JsonWebTokenError ? 401 : 400;
+    res.status(status).end();
+  }
+});
 
 /**
  * This sends an email message.
@@ -65,30 +101,6 @@ function sendJson(res, json) {
   res.send(json);
 }
 
-// This verifies the JWT in a request cookie.
-function verifyToken(req, res, username) {
-  const {token} = req.cookies;
-  if (!token) {
-    res.status(401).end();
-    return false;
-  }
-
-  let payload;
-  try {
-    // This parses the JWT string.  It will throw if
-    // the token has expired or the signature does not match.
-    payload = jwt.verify(token, secrets.jwtKey);
-    if (payload.username !== username)
-      throw new Error('token not for username');
-    console.log('server.js verifyToken: payload =', payload);
-    return true;
-  } catch (e) {
-    const status = e instanceof jwt.JsonWebTokenError ? 401 : 400;
-    res.status(status).end();
-    return false;
-  }
-}
-
 // This returns a list of accounts including everything but passwords.
 // It is just for testing.  Remove when finished!
 app.get('/account', (req, res) => {
@@ -103,11 +115,19 @@ app.get('/account', (req, res) => {
 
 // This deletes an account.
 app.delete('/account/:username', (req, res) => {
-  if (!verifyToken(req, res)) return;
-
   const {username} = req.params;
-  const found = delete usernameToAccount[username];
-  res.status(found ? 204 : 404).end(); // No Content or Not Found
+  const {token} = req.cookies;
+  const payload = jwt.verify(token, secrets.jwtKey);
+  if (payload.username === username) {
+    const account = usernameToAccount[username];
+    if (account) {
+      delete usernameToAccount[username];
+      delete emailToAccount[account.email];
+    }
+    res.status(account ? 204 : 404).end(); // No Content or Not Found
+  } else {
+    res.status(403).send('cannot delete other users');
+  }
 });
 
 // This creates a new account.
@@ -129,8 +149,6 @@ app.post('/account', (req, res) => {
 
 // This updates an account.
 app.put('/account', (req, res) => {
-  if (!verifyToken(req, res)) return;
-
   const {body} = req;
   const {email, username} = body;
   if (usernameToAccount[username]) {
@@ -145,8 +163,6 @@ app.put('/account', (req, res) => {
 
 // This sends an email with a specified subject and text.
 app.post('/email', (req, res) => {
-  if (!verifyToken(req, res)) return;
-
   const {html, subject, text, to} = req.body;
   sendEmail({
     to,
@@ -165,12 +181,13 @@ app.post('/email', (req, res) => {
 // This sends an email containing a link for resetting
 // the password of the associated account.
 app.post('/forgot-password', (req, res) => {
-  if (!verifyToken(req, res)) return;
-
   const {email} = req.body;
-  const code = uuidv4();
-  codeToEmail[code] = email;
-  const url = 'http://localhost:5000/#password?code=' + code;
+  const token = jwt.sign({email}, secrets.jwtKey, {
+    algorithm: 'HS256',
+    expiresIn: JWT_EXPIRY_SECONDS
+  });
+  tokenToEmail[token] = email;
+  const url = 'http://localhost:5000/#password?token=' + token;
   const html =
     '<p>Click the link to reset your password.</p>' +
     `<a href="${url}">Reset Password</a>`;
@@ -200,7 +217,6 @@ app.post('/login', (req, res) => {
       algorithm: 'HS256',
       expiresIn: JWT_EXPIRY_SECONDS
     });
-    console.log('server.js login: token =', token);
 
     const copy = {...account};
     delete copy.password;
@@ -212,22 +228,28 @@ app.post('/login', (req, res) => {
 });
 
 // This changes the password of the account associated
-// with a one-time code that was provided via an email.
+// with a one-time use token that was provided via an email.
 app.post('/password', (req, res) => {
-  const {code, password} = req.body;
-  //TODO: Verify that the code is not expired!
-  const email = codeToEmail[code];
-  if (email) {
+  const {password, token} = req.body;
+
+  try {
+    // This parses the JWT string.  It will throw if
+    // the token has expired or the signature does not match.
+    const payload = jwt.verify(token, secrets.jwtKey);
+
+    const email = tokenToEmail[token];
+    if (!email || email !== payload.email) throw new Error('catch me');
+
     const account = emailToAccount[email];
     if (account) {
       account.password = password;
-      delete codeToEmail[code];
+      delete tokenToEmail[token];
       res.end();
     } else {
       res.status(400).send('no account found for email ' + email);
     }
-  } else {
-    res.status(403).send('code expired');
+  } catch (e) {
+    res.status(403).send('expired or invalid token');
   }
 });
 

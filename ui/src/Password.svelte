@@ -5,7 +5,7 @@
 
   const dispatch = createEventDispatcher();
 
-  const {code} = getQueryParams();
+  const {token} = getQueryParams();
 
   let confirmPassword = 'FooBar789';
   let message = '';
@@ -26,7 +26,7 @@
     if (message) return;
 
     try {
-      await postJson('password', {code, password: newPassword});
+      await postJson('password', {password: newPassword, token});
       alert('Your password has been changed.');
       dispatch('success', '#login');
     } catch (e) {

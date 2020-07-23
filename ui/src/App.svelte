@@ -49,7 +49,8 @@
       await postJson('email', {
         to,
         subject: 'Testing Nodemailer',
-        text: 'Did you receive this?'
+        text: 'Did you receive this?',
+        username: $profile.username
       });
       alert(`Sent email to ${to}.`);
     } catch (e) {
