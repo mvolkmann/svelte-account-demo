@@ -9,7 +9,11 @@ import nodemailer from 'nodemailer';
 import secrets from '../../secrets.json';
 import {v4 as uuidv4} from 'uuid';
 
-const jwtExpirySeconds = 5 * 60;
+const JWT_EXPIRY_SECONDS = 5 * 60;
+
+const codeToEmail = {};
+const emailToAccount = {};
+const usernameToAccount = {};
 
 // For nodemailer ...
 const transporter = nodemailer.createTransport({
@@ -28,13 +32,9 @@ app.use(express.static('public'));
 app.use(express.json()); // for JSON body parsing
 app.use(express.text()); // for text body parsing
 
-const emailToAccount = {};
-const usernameToAccount = {};
-
-const codeToEmail = {};
-
 /**
- * To enable sending email using your OCI GMail account:
+ * This sends an email message.
+ * To enable sending email using a GMail account:
  * - It must be a GSuite Account, not a regular GMail account.
  * - Click profile icon in upper-right.
  * - Click "Manage your Google Account"
@@ -55,6 +55,7 @@ function sendEmail({html, onError, onSuccess, text, to, subject}) {
   });
 }
 
+// This sends a JSON string in the response.
 function sendJson(res, json) {
   // This response header is required when credentials is set to "include".
   res.set('Access-Control-Allow-Origin', 'http://localhost:5000');
@@ -64,7 +65,8 @@ function sendJson(res, json) {
   res.send(json);
 }
 
-function validateToken(req, res) {
+// This verifies the JWT in a request cookie.
+function verifyToken(req, res, username) {
   const {token} = req.cookies;
   if (!token) {
     res.status(401).end();
@@ -76,7 +78,9 @@ function validateToken(req, res) {
     // This parses the JWT string.  It will throw if
     // the token has expired or the signature does not match.
     payload = jwt.verify(token, secrets.jwtKey);
-    console.log('server.js validateToken: payload =', payload);
+    if (payload.username !== username)
+      throw new Error('token not for username');
+    console.log('server.js verifyToken: payload =', payload);
     return true;
   } catch (e) {
     const status = e instanceof jwt.JsonWebTokenError ? 401 : 400;
@@ -85,6 +89,8 @@ function validateToken(req, res) {
   }
 }
 
+// This returns a list of accounts including everything but passwords.
+// It is just for testing.  Remove when finished!
 app.get('/account', (req, res) => {
   // Create a JSON string from the usernameToAccount map
   // that does not include passwords.
@@ -95,12 +101,16 @@ app.get('/account', (req, res) => {
   sendJson(res, json);
 });
 
+// This deletes an account.
 app.delete('/account/:username', (req, res) => {
+  if (!verifyToken(req, res)) return;
+
   const {username} = req.params;
   const found = delete usernameToAccount[username];
   res.status(found ? 204 : 404).end(); // No Content or Not Found
 });
 
+// This creates a new account.
 app.post('/account', (req, res) => {
   const {body} = req;
   const {email, username} = body;
@@ -117,7 +127,10 @@ app.post('/account', (req, res) => {
   }
 });
 
+// This updates an account.
 app.put('/account', (req, res) => {
+  if (!verifyToken(req, res)) return;
+
   const {body} = req;
   const {email, username} = body;
   if (usernameToAccount[username]) {
@@ -130,8 +143,9 @@ app.put('/account', (req, res) => {
   }
 });
 
+// This sends an email with a specified subject and text.
 app.post('/email', (req, res) => {
-  if (!validateToken(req, res)) return;
+  if (!verifyToken(req, res)) return;
 
   const {html, subject, text, to} = req.body;
   sendEmail({
@@ -148,7 +162,11 @@ app.post('/email', (req, res) => {
   });
 });
 
+// This sends an email containing a link for resetting
+// the password of the associated account.
 app.post('/forgot-password', (req, res) => {
+  if (!verifyToken(req, res)) return;
+
   const {email} = req.body;
   const code = uuidv4();
   codeToEmail[code] = email;
@@ -170,27 +188,34 @@ app.post('/forgot-password', (req, res) => {
   });
 });
 
+// This authenticates a login attempt.
+// It returns profile data for the user
+// and a JWT in a cookie that must be returned in
+// all subsequent requests that require authentication.
 app.post('/login', (req, res) => {
   const {password, username} = req.body;
   const account = usernameToAccount[username];
   if (account && account.password === password) {
     const token = jwt.sign({username}, secrets.jwtKey, {
       algorithm: 'HS256',
-      expiresIn: jwtExpirySeconds
+      expiresIn: JWT_EXPIRY_SECONDS
     });
     console.log('server.js login: token =', token);
 
     const copy = {...account};
     delete copy.password;
-    res.cookie('token', token, {maxAge: jwtExpirySeconds * 1000});
+    res.cookie('token', token, {maxAge: JWT_EXPIRY_SECONDS * 1000});
     sendJson(res, JSON.stringify(copy));
   } else {
     res.status(401).end(); // Unauthorized
   }
 });
 
+// This changes the password of the account associated
+// with a one-time code that was provided via an email.
 app.post('/password', (req, res) => {
   const {code, password} = req.body;
+  //TODO: Verify that the code is not expired!
   const email = codeToEmail[code];
   if (email) {
     const account = emailToAccount[email];
@@ -206,8 +231,7 @@ app.post('/password', (req, res) => {
   }
 });
 
-//const port = 1919;
-//app.listen(port, () => console.log('listening on port', port));
+// Start a server that listens for HTTPS requests.
 const HTTPS_PORT = 443;
 const httpsOptions = {
   key: fs.readFileSync('server.key'),
