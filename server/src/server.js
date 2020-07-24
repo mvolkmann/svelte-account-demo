@@ -144,10 +144,13 @@ function sendEmail({html, onError, onSuccess, text, to, subject}) {
 // This sends a JSON string in the response.
 function sendJson(res, object, token) {
   if (token) {
-    // Generate a new CSRF token for every JSON response.
+    // Generate a new CSRF token if we don't have one for this token.
     // Clients must return this in their next request.
-    const csrf = uuidv4();
-    tokenToCsrf[token] = csrf;
+    let csrf = tokenToCsrf[token];
+    if (!csrf) {
+      csrf = uuidv4();
+      tokenToCsrf[token] = csrf;
+    }
     object.csrf = csrf;
   }
 
