@@ -27,7 +27,7 @@
   let hash = getHash();
   $: if (hash === '#login') stopTimer();
   $: component = hashMap[hash] || Login;
-  $: authenticated = component && !unauthenticatedHashes.includes(hash);
+  $: authenticated = component && hash && !unauthenticatedHashes.includes(hash);
 
   let dialog = null;
   let message = '';
@@ -67,7 +67,6 @@
     } else {
       location.href = '/' + hash;
       onInactive(dialog, () => {
-        console.log('App.svelte handleSuccess: calling logout');
         logout();
         // Wait for return to login page.
         setTimeout(() => alert('Your session has timed out.'), 100);

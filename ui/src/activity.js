@@ -10,25 +10,26 @@ let logout;
 let timeoutId;
 
 function resetTimer() {
-  if (timeoutId) {
-    clearTimeout(timeoutId);
-    console.log('activity.js resetTimer: cleared', timeoutId);
-  }
+  if (timeoutId) clearTimeout(timeoutId);
   startTimer();
 }
 
 const debouncedResetTimer = debounce(resetTimer, 500, {
-  leading: true,
-  trailing: true
+  leading: true, // resets timer immediately to prevent logout
+  trailing: true // resets timer again so it starts from last activity
 });
+
+function addListeners() {
+  EVENTS.forEach(event =>
+    document.addEventListener(event, debouncedResetTimer)
+  );
+}
 
 export function onInactive(aDialog, callback) {
   dialog = aDialog;
   logout = callback;
   startTimer();
-  EVENTS.forEach(event =>
-    document.addEventListener(event, debouncedResetTimer)
-  );
+  addListeners();
 }
 
 function removeListeners() {
@@ -39,29 +40,28 @@ function removeListeners() {
 
 function startTimer() {
   timeoutId = setTimeout(warn, WARN_MS);
-  console.log('activity.js startTimer: started', timeoutId);
 }
 
 export function stopTimer() {
   removeListeners();
   clearTimeout(timeoutId);
-  console.log('activity.js stopTimer: cleared', timeoutId);
   timeoutId = undefined;
 }
 
 function warn() {
+  removeListeners();
+
   timeoutId = setTimeout(() => {
-    removeListeners();
-    console.log('activity.js warn: calling logout');
+    dialog.close();
     logout();
   }, LOGOUT_MS);
-  console.log('activity.js warn: started', timeoutId);
 
   // The timeout is not cleared if the user
   // doesn't respond to the confirmation dialog.
   function onAnswer(answer) {
     if (answer) {
       clearTimeout(timeoutId);
+      addListeners();
       startTimer();
     } else {
       clearTimeout(timeoutId);
