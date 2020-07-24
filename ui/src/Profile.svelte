@@ -40,7 +40,7 @@
 <form on:submit|preventDefault={updateProfile}>
   <label>
     Username
-    <input disabled value={username} />
+    <input autocomplete="username" disabled value={username} />
   </label>
   <label>
     First Name

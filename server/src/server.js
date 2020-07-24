@@ -6,6 +6,8 @@ import https from 'https';
 import jwt from 'jsonwebtoken';
 import morgan from 'morgan';
 import nodemailer from 'nodemailer';
+import {v4 as uuidv4} from 'uuid';
+
 import secrets from '../../secrets.json';
 
 //const JWT_EXPIRY_SECONDS = 5 * 60;
@@ -22,6 +24,7 @@ const UNPROTECTED_ROUTES = [
 // to multiple servers that are selected by a load balancer.
 const emailToAccount = {};
 const revokedTokens = new Set();
+const tokenToCsrf = {};
 const tokenToEmail = {};
 const usernameToAccount = {};
 
@@ -43,7 +46,7 @@ app.use(express.json()); // for JSON body parsing
 app.use(express.text()); // for text body parsing
 
 // This custom middleware verifies that requests to protected routes
-// include a valid JWT.
+// include a valid JWT AND that the CSRF token matches.
 app.use((req, res, next) => {
   const {method, url} = req;
   const route = UNPROTECTED_ROUTES.find(
@@ -53,9 +56,14 @@ app.use((req, res, next) => {
 
   // Verify the JWT token.
 
-  const {username} = req.body;
   const {token} = req.cookies;
-  if (!token || revokedTokens.has(token)) return res.status(401).end();
+  if (!token) return res.status(401).end('missing token');
+  if (revokedTokens.has(token)) return res.status(401).end('token is revoked');
+
+  const {csrf, username} = req.body;
+  if (!route && csrf !== tokenToCsrf[token]) {
+    return res.status(401).send('CSRF mismatch');
+  }
 
   try {
     // This parses the JWT string.  It will throw if
@@ -72,7 +80,9 @@ app.use((req, res, next) => {
 
 function addToken(res, username, email) {
   const token = createToken(username, email);
+  tokenToCsrf[token] = uuidv4();
   res.cookie('token', token, {maxAge: JWT_EXPIRY_SECONDS * 1000});
+  return token;
 }
 
 function createToken(username, email) {
@@ -81,7 +91,7 @@ function createToken(username, email) {
   if (email) payload.email = email;
 
   const token = jwt.sign(payload, secrets.jwtKey, {
-    algorithm: 'HS256',
+    algorithm: 'HS256', // HMAC SHA256 algorithm
     expiresIn: JWT_EXPIRY_SECONDS
   });
 
@@ -96,10 +106,16 @@ function deleteRevokedTokens() {
     try {
       jwt.verify(token, secrets.jwtKey);
     } catch (e) {
-      console.log('server.js deleteRevokedTokens: removing', token);
       revokedTokens.delete(token);
+      console.info('removed revoked token', token);
     }
   }
+}
+
+function sanitize(object) {
+  const copy = {...object};
+  delete copy.password;
+  return copy;
 }
 
 /**
@@ -126,13 +142,21 @@ function sendEmail({html, onError, onSuccess, text, to, subject}) {
 }
 
 // This sends a JSON string in the response.
-function sendJson(res, json) {
+function sendJson(res, object, token) {
+  if (token) {
+    // Generate a new CSRF token for every JSON response.
+    // Clients must return this in their next request.
+    const csrf = uuidv4();
+    tokenToCsrf[token] = csrf;
+    object.csrf = csrf;
+  }
+
   // This response header is required when credentials is set to "include".
   res.set('Access-Control-Allow-Origin', 'http://localhost:5000');
 
   res.set('Access-Control-Expose-Headers', 'Content-Type');
   res.set('Content-Type', 'application/json');
-  res.send(json);
+  res.send(JSON.stringify(object));
 }
 
 // This returns a list of accounts including everything but passwords.
@@ -141,10 +165,7 @@ app.get('/account', (req, res) => {
   // Create a JSON string from the usernameToAccount map
   // that does not include passwords.
   const accounts = Object.values(usernameToAccount);
-  const json = JSON.stringify(accounts, (key, value) => {
-    return key === 'password' ? undefined : value;
-  });
-  sendJson(res, json);
+  sendJson(res, accounts.map(sanitize));
 });
 
 // This deletes an account.
@@ -175,10 +196,10 @@ app.post('/account', (req, res) => {
     res.status(403); // Forbidden
     res.send(`An account with email "${email}" already exists.`);
   } else {
-    addToken(res, username, email);
+    const token = addToken(res, username, email);
     usernameToAccount[username] = body;
     emailToAccount[email] = body;
-    res.end();
+    sendJson(res, sanitize(body), token);
   }
 });
 
@@ -189,6 +210,7 @@ app.put('/account', (req, res) => {
   if (usernameToAccount[username]) {
     usernameToAccount[username] = body;
     emailToAccount[email] = body;
+    sendJson(res, sanitize(body), req.cookies.token);
     res.end();
   } else {
     res.status(404); // Not Found
@@ -249,10 +271,8 @@ app.post('/login', (req, res) => {
   const {password, username} = req.body;
   const account = usernameToAccount[username];
   if (account && account.password === password) {
-    addToken(res, username);
-    const copy = {...account};
-    delete copy.password;
-    sendJson(res, JSON.stringify(copy));
+    const token = addToken(res, username);
+    sendJson(res, sanitize(account), token);
   } else {
     res.status(401).end(); // Unauthorized
   }

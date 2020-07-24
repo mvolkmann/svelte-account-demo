@@ -1,5 +1,5 @@
 <script>
-  import {onInactive, stopTimer} from './activity';
+  //import {onInactive, stopTimer} from './activity';
   import {deleteResource, postJson} from './fetch-util';
   import ForgotPassword from './ForgotPassword.svelte';
   import Login from './Login.svelte';
@@ -27,7 +27,7 @@
   };
 
   const hash = getHash();
-  if (hash === '#login') stopTimer();
+  //if (hash === '#login') stopTimer();
   let component = hashMap[hash] || Login;
 
   async function deleteAccount() {
@@ -64,11 +64,13 @@
       logout();
     } else {
       location.href = '/' + hash;
+      /*
       onInactive(() => {
         logout();
         // Wait for return to login page.
         setTimeout(() => alert('Your session has timed out.'), 100);
       });
+      */
     }
   }
 

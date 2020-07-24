@@ -3,8 +3,15 @@ import {taskEnd, taskStart} from './Spinner.svelte';
 
 const URL_PREFIX = 'https://localhost/';
 
+let csrf;
+
 export async function deleteResource(path) {
-  const res = await fetch(URL_PREFIX + path, getOptions({method: 'DELETE'}));
+  const body = JSON.stringify({csrf});
+  const headers = {'Content-Type': 'application/json'};
+  const res = await fetch(
+    URL_PREFIX + path,
+    getOptions({method: 'DELETE', headers, body})
+  );
   if (!res.ok) {
     const {status, statusText} = res;
     const message =
@@ -21,7 +28,7 @@ export async function getJson(path) {
   try {
     const res = await fetch(URL_PREFIX + path, getOptions());
     if (!res.ok) throw new Error(await res.text());
-    return res.json();
+    return handleJsonResponse(res);
   } finally {
     taskEnd();
   }
@@ -41,16 +48,27 @@ function getOptions(options = {}) {
   return options;
 }
 
+async function handleJsonResponse(res) {
+  const contentType = res.headers.get('Content-Type') || '';
+  const isJson = contentType.startsWith('application/json');
+  if (isJson) {
+    const json = await res.json();
+    csrf = json.csrf;
+    return json;
+  }
+}
+
 export const postJson = async (path, payload) =>
-  handleJson('POST', path, payload);
+  postPutJson('POST', path, payload);
 
 export const putJson = async (path, payload) =>
-  handleJson('PUT', path, payload);
+  postPutJson('PUT', path, payload);
 
-async function handleJson(method, path, payload) {
+async function postPutJson(method, path, payload) {
   taskStart();
   //await sleep(2000); // simulate long-running task
   try {
+    payload.csrf = csrf;
     const body = JSON.stringify(payload);
     const res = await fetch(
       URL_PREFIX + path,
@@ -60,11 +78,7 @@ async function handleJson(method, path, payload) {
         method
       })
     );
-    if (res.ok) {
-      const contentType = res.headers.get('Content-Type') || '';
-      const isJson = contentType.startsWith('application/json');
-      return isJson ? res.json() : undefined;
-    }
+    if (res.ok) return handleJsonResponse(res);
 
     const {status} = res;
     const message =
