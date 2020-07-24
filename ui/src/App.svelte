@@ -35,7 +35,7 @@
     if (answer) {
       try {
         await deleteResource('account/' + $profile.username);
-        location.href = '/#login';
+        logout();
       } catch (e) {
         //TODO: Handle better
         console.error('App.svelte deleteAccount: error =', e);
@@ -60,11 +60,12 @@
 
   function handleSuccess(event) {
     const hash = event.detail || '#welcome';
-    location.href = '/' + hash;
-
-    if (hash !== '#login') {
+    if (hash === '#login') {
+      logout();
+    } else {
+      location.href = '/' + hash;
       onInactive(() => {
-        location.href = '/#login';
+        logout();
         // Wait for return to login page.
         setTimeout(() => alert('Your session has timed out.'), 100);
       });
@@ -77,6 +78,11 @@
     authenticated = component && !unauthenticatedHashes.includes(hash);
     if (!component) component = NotFound;
   }
+
+  function logout() {
+    postJson('logout', {username: $profile.username});
+    location.href = '/#login';
+  }
 </script>
 
 <svelte:window on:hashchange={hashChange} />
@@ -84,7 +90,7 @@
 <main>
   <header>
     {#if authenticated}
-      <a class="button" href="/#login">Logout</a>
+      <a class="button" on:click={logout}>Logout</a>
       <a class="button" href="/#profile">Profile</a>
       <button on:click={deleteAccount}>Delete Account</button>
       <button on:click={emailTest}>Email Test</button>

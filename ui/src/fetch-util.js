@@ -13,7 +13,6 @@ export async function deleteResource(path) {
         : `${statusText} (${status}) ${await res.text()}`;
     throw message;
   }
-  sessionEnded(res);
 }
 
 export async function getJson(path) {
@@ -21,13 +20,16 @@ export async function getJson(path) {
   //await sleep(2000); // simulate long-running task
   try {
     const res = await fetch(URL_PREFIX + path, getOptions());
-    if (sessionEnded(res)) return {};
-
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   } finally {
     taskEnd();
   }
+}
+
+async function getMessage(res) {
+  const message = await res.text();
+  return message || `${res.statusText} (${res.status})`;
 }
 
 function getOptions(options = {}) {
@@ -61,31 +63,18 @@ async function handleJson(method, path, payload) {
     if (res.ok) {
       const contentType = res.headers.get('Content-Type') || '';
       const isJson = contentType.startsWith('application/json');
-      if (sessionEnded(res)) return {};
       return isJson ? res.json() : undefined;
     }
 
-    const {status, statusText} = res;
+    const {status} = res;
     const message =
       status === 401
         ? 'Invalid username or password'
         : status === 404
         ? method + ' ' + path + ' service not found'
-        : `${statusText} (${status}) ${await res.text()}`;
+        : await getMessage(res);
     throw message;
   } finally {
     taskEnd();
   }
-}
-
-function sessionEnded(res) {
-  const {redirected, status, url} = res;
-  sessionStorage.setItem('lastHttpStatus', String(status));
-
-  const expired = status === 401 || status === 403;
-  if (expired) sessionStorage.removeItem('authToken');
-
-  const end = expired || (redirected && url.endsWith('/login'));
-  if (end) location.href = '/#login';
-  return end;
 }

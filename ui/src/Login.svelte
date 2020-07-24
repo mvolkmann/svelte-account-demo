@@ -49,7 +49,7 @@
     </button>
   </div>
 
-  <div class="message">{message}</div>
+  <div class="error">{message}</div>
 </form>
 
 <style>
@@ -63,9 +63,5 @@
 
   label {
     text-align: right;
-  }
-
-  .message {
-    color: red;
   }
 </style>

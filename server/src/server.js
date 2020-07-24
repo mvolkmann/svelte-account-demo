@@ -8,10 +8,12 @@ import morgan from 'morgan';
 import nodemailer from 'nodemailer';
 import secrets from '../../secrets.json';
 
-const JWT_EXPIRY_SECONDS = 5 * 60;
+//const JWT_EXPIRY_SECONDS = 5 * 60;
+const JWT_EXPIRY_SECONDS = 1 * 60;
 const UNPROTECTED_ROUTES = [
   {method: 'GET', url: '/account'},
   {method: 'POST', url: '/account'},
+  {method: 'POST', url: '/forgot-password'},
   {method: 'POST', url: '/login'},
   {method: 'POST', url: '/password'} // uses token in query parameter
 ];
@@ -19,6 +21,7 @@ const UNPROTECTED_ROUTES = [
 // These can't just be held in memory if this will be deployed
 // to multiple servers that are selected by a load balancer.
 const emailToAccount = {};
+const revokedTokens = new Set();
 const tokenToEmail = {};
 const usernameToAccount = {};
 
@@ -52,8 +55,7 @@ app.use((req, res, next) => {
 
   const {username} = req.body;
   const {token} = req.cookies;
-  console.log('server.js middleware: token =', token);
-  if (!token) return res.status(401).end();
+  if (!token || revokedTokens.has(token)) return res.status(401).end();
 
   try {
     // This parses the JWT string.  It will throw if
@@ -67,6 +69,38 @@ app.use((req, res, next) => {
     res.status(status).end();
   }
 });
+
+function addToken(res, username, email) {
+  const token = createToken(username, email);
+  res.cookie('token', token, {maxAge: JWT_EXPIRY_SECONDS * 1000});
+}
+
+function createToken(username, email) {
+  const payload = {};
+  if (username) payload.username = username;
+  if (email) payload.email = email;
+
+  const token = jwt.sign(payload, secrets.jwtKey, {
+    algorithm: 'HS256',
+    expiresIn: JWT_EXPIRY_SECONDS
+  });
+
+  if (email) tokenToEmail[token] = email;
+
+  return token;
+}
+
+// This removes tokens that are no longer valid from the revokedTokens set.
+function deleteRevokedTokens() {
+  for (const token of revokedTokens) {
+    try {
+      jwt.verify(token, secrets.jwtKey);
+    } catch (e) {
+      console.log('server.js deleteRevokedTokens: removing', token);
+      revokedTokens.delete(token);
+    }
+  }
+}
 
 /**
  * This sends an email message.
@@ -141,6 +175,7 @@ app.post('/account', (req, res) => {
     res.status(403); // Forbidden
     res.send(`An account with email "${email}" already exists.`);
   } else {
+    addToken(res, username, email);
     usernameToAccount[username] = body;
     emailToAccount[email] = body;
     res.end();
@@ -182,11 +217,12 @@ app.post('/email', (req, res) => {
 // the password of the associated account.
 app.post('/forgot-password', (req, res) => {
   const {email} = req.body;
-  const token = jwt.sign({email}, secrets.jwtKey, {
-    algorithm: 'HS256',
-    expiresIn: JWT_EXPIRY_SECONDS
-  });
-  tokenToEmail[token] = email;
+  const account = emailToAccount[email];
+  if (!account) {
+    return res.status(400).send('no account found for email ' + email);
+  }
+
+  const token = createToken(undefined, email);
   const url = 'http://localhost:5000/#password?token=' + token;
   const html =
     '<p>Click the link to reset your password.</p>' +
@@ -213,18 +249,19 @@ app.post('/login', (req, res) => {
   const {password, username} = req.body;
   const account = usernameToAccount[username];
   if (account && account.password === password) {
-    const token = jwt.sign({username}, secrets.jwtKey, {
-      algorithm: 'HS256',
-      expiresIn: JWT_EXPIRY_SECONDS
-    });
-
+    addToken(res, username);
     const copy = {...account};
     delete copy.password;
-    res.cookie('token', token, {maxAge: JWT_EXPIRY_SECONDS * 1000});
     sendJson(res, JSON.stringify(copy));
   } else {
     res.status(401).end(); // Unauthorized
   }
+});
+
+app.post('/logout', (req, res) => {
+  const {token} = req.cookies;
+  revokedTokens.add(token);
+  res.end();
 });
 
 // This changes the password of the account associated
@@ -238,7 +275,9 @@ app.post('/password', (req, res) => {
     const payload = jwt.verify(token, secrets.jwtKey);
 
     const email = tokenToEmail[token];
-    if (!email || email !== payload.email) throw new Error('catch me');
+    if (!email || email !== payload.email) {
+      throw new Error('email does not match token');
+    }
 
     const account = emailToAccount[email];
     if (account) {
@@ -252,6 +291,8 @@ app.post('/password', (req, res) => {
     res.status(403).send('expired or invalid token');
   }
 });
+
+setInterval(deleteRevokedTokens, 10000);
 
 // Start a server that listens for HTTPS requests.
 const HTTPS_PORT = 443;

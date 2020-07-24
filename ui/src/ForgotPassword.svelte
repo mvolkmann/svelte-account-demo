@@ -32,10 +32,4 @@
   <button type="button" on:click={() => dispatch('cancel')}>Cancel</button>
 </form>
 
-<div class="message">{message}</div>
-
-<style>
-  .message {
-    color: red;
-  }
-</style>
+<div class="error">{message}</div>

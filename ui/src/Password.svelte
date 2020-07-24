@@ -57,5 +57,5 @@
     <button type="button" on:click={() => dispatch('cancel')}>Cancel</button>
   </div>
 
-  <div class="message">{message}</div>
+  <div class="error">{message}</div>
 </form>

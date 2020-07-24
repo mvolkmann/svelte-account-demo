@@ -14,7 +14,7 @@
     firstName && lastName && email && password && confirmPassword === password;
 
   function cancel() {
-    dispatch('cancel');
+    dispatch('success', '#welcome');
   }
 
   async function updateProfile() {
@@ -73,7 +73,7 @@
     <button type="button" on:click={cancel}>Cancel</button>
   </div>
 
-  <div class="message">{message}</div>
+  <div class="error">{message}</div>
 </form>
 
 <style>
@@ -87,9 +87,5 @@
 
   label {
     text-align: right;
-  }
-
-  .message {
-    color: red;
   }
 </style>
