@@ -1,18 +1,20 @@
 import {debounce} from 'lodash-es';
+import {confirm} from './MessageDialog.svelte';
 
 const EVENTS = ['keypress', 'mousedown', 'mousemove', 'touchmove'];
-//const TIMEOUT_MS = 60 * 1000; // one minute
-const TIMEOUT_MS = 5 * 1000; // five seconds
+const WARN_MS = 5 * 1000;
+const LOGOUT_MS = 5 * 1000;
 
-let callback;
+let dialog;
+let logout;
 let timeoutId;
 
 function resetTimer() {
   if (timeoutId) {
-    console.log('activity.js resetTimer: clearing', timeoutId);
     clearTimeout(timeoutId);
-    startTimer();
+    console.log('activity.js resetTimer: cleared', timeoutId);
   }
+  startTimer();
 }
 
 const debouncedResetTimer = debounce(resetTimer, 500, {
@@ -20,28 +22,57 @@ const debouncedResetTimer = debounce(resetTimer, 500, {
   trailing: true
 });
 
-export function onInactive(cb) {
-  callback = cb;
+export function onInactive(aDialog, callback) {
+  dialog = aDialog;
+  logout = callback;
+  startTimer();
   EVENTS.forEach(event =>
     document.addEventListener(event, debouncedResetTimer)
   );
-  startTimer();
 }
 
-function startTimer() {
-  timeoutId = setTimeout(() => {
-    console.log('activity.js startTimer: got timeout');
-    stopTimer();
-    callback();
-  }, TIMEOUT_MS);
-  console.log('activity.js startTimer: timeoutId =', timeoutId);
-}
-
-export function stopTimer() {
-  console.log('activity.js stopTimer: clearing', timeoutId);
-  clearTimeout(timeoutId);
-  timeoutId = undefined;
+function removeListeners() {
   EVENTS.forEach(event =>
     document.removeEventListener(event, debouncedResetTimer)
   );
+}
+
+function startTimer() {
+  timeoutId = setTimeout(warn, WARN_MS);
+  console.log('activity.js startTimer: started', timeoutId);
+}
+
+export function stopTimer() {
+  removeListeners();
+  clearTimeout(timeoutId);
+  console.log('activity.js stopTimer: cleared', timeoutId);
+  timeoutId = undefined;
+}
+
+function warn() {
+  timeoutId = setTimeout(() => {
+    removeListeners();
+    console.log('activity.js warn: calling logout');
+    logout();
+  }, LOGOUT_MS);
+  console.log('activity.js warn: started', timeoutId);
+
+  // The timeout is not cleared if the user
+  // doesn't respond to the confirmation dialog.
+  function onAnswer(answer) {
+    if (answer) {
+      clearTimeout(timeoutId);
+      startTimer();
+    } else {
+      clearTimeout(timeoutId);
+      logout();
+    }
+  }
+
+  const title = 'Continue Session?';
+  const text =
+    'You be logged out in one minute due to inactivity.\n' +
+    'Press Yes to remain logged in.\n' +
+    'Press No to log out now.';
+  confirm({dialog, onAnswer, title, text});
 }

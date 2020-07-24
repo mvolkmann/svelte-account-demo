@@ -9,5 +9,18 @@ const defaultProfile = {
   username: 'mvolkmann'
 };
 
-export const busy = writable(false);
-export const profile = writable(defaultProfile);
+function persist(key, value) {
+  sessionStorage.setItem(key, JSON.stringify(value));
+}
+
+export function writableSession(key, initialValue) {
+  const sessionValue = JSON.parse(sessionStorage.getItem(key));
+  if (!sessionValue) persist(key, initialValue);
+
+  const store = writable(sessionValue || initialValue);
+  store.subscribe(value => persist(key, value));
+  return store;
+}
+
+export const busy = writableSession('busy', false);
+export const profile = writableSession('profile', defaultProfile);

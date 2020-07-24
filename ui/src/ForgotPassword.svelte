@@ -1,6 +1,7 @@
 <script>
   import {createEventDispatcher} from 'svelte';
   import {postJson} from './fetch-util';
+  import {alert} from './MessageDialog.svelte';
   import secrets from '../../secrets.json';
 
   const dispatch = createEventDispatcher();
@@ -12,7 +13,10 @@
     try {
       await postJson('forgot-password', {email});
       dispatch('success', '#login');
-      alert('Check your email for a link to reset your password.');
+      alert({
+        title: 'Email Sent',
+        text: 'Check your email for a link to reset your password.'
+      });
     } catch (e) {
       message = e;
     }

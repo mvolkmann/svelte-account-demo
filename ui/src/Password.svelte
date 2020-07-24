@@ -1,6 +1,7 @@
 <script>
   import {createEventDispatcher} from 'svelte';
   import {postJson} from './fetch-util';
+  import {alert} from './MessageDialog.svelte';
   import {getQueryParams, validatePassword} from './util';
 
   const dispatch = createEventDispatcher();
@@ -27,7 +28,10 @@
 
     try {
       await postJson('password', {password: newPassword, token});
-      alert('Your password has been changed.');
+      alert({
+        title: 'Password Changed',
+        text: 'Your password has been changed.'
+      });
       dispatch('success', '#login');
     } catch (e) {
       message = e;

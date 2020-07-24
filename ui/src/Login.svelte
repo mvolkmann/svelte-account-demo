@@ -54,6 +54,7 @@
 
 <style>
   .buttons {
+    margin-top: 0.5rem;
     text-align: center;
   }
 

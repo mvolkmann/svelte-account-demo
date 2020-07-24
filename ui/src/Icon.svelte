@@ -41,7 +41,7 @@
 
   // This is an icon imported from a @fortawesome package.
   export let icon = undefined;
-  export let size;
+  export let size = '1rem';
 
   const id = getId('icon-');
   const classes = 'icon ' + id + (className ? ' ' + className : '');

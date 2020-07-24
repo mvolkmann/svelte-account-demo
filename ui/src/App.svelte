@@ -1,9 +1,9 @@
 <script>
-  //import {onInactive, stopTimer} from './activity';
+  import {onInactive, stopTimer} from './activity';
   import {deleteResource, postJson} from './fetch-util';
   import ForgotPassword from './ForgotPassword.svelte';
   import Login from './Login.svelte';
-  import NotFound from './NotFound.svelte';
+  import MessageDialog, {alert} from './MessageDialog.svelte';
   import Password from './Password.svelte';
   import Profile from './Profile.svelte';
   import secrets from '../../secrets.json';
@@ -15,8 +15,6 @@
 
   const unauthenticatedHashes = ['#forgot', '#login', '#signUp'];
 
-  let authenticated = false;
-
   const hashMap = {
     '#forgot': ForgotPassword,
     '#login': Login,
@@ -26,9 +24,13 @@
     '#welcome': Welcome
   };
 
-  const hash = getHash();
-  //if (hash === '#login') stopTimer();
-  let component = hashMap[hash] || Login;
+  let hash = getHash();
+  $: if (hash === '#login') stopTimer();
+  $: component = hashMap[hash] || Login;
+  $: authenticated = component && !unauthenticatedHashes.includes(hash);
+
+  let dialog = null;
+  let message = '';
 
   async function deleteAccount() {
     const answer = confirm('Are you sure you want to delete this account?');
@@ -37,24 +39,24 @@
         await deleteResource('account/' + $profile.username);
         logout();
       } catch (e) {
-        //TODO: Handle better
-        console.error('App.svelte deleteAccount: error =', e);
+        message = e;
       }
     }
   }
 
   async function emailTest() {
+    const {firstName, lastName} = $profile;
     try {
       const to = secrets.testEmail;
       await postJson('email', {
         to,
         subject: 'Testing Nodemailer',
-        text: 'Did you receive this?',
+        text: `Hello, ${firstName} ${lastName}!`,
         username: $profile.username
       });
-      alert(`Sent email to ${to}.`);
+      alert({dialog, text: `Sent email to ${to}.`});
     } catch (e) {
-      console.error('App.svelte emailTest: error =', e);
+      message = e;
     }
   }
 
@@ -64,21 +66,13 @@
       logout();
     } else {
       location.href = '/' + hash;
-      /*
-      onInactive(() => {
+      onInactive(dialog, () => {
+        console.log('App.svelte handleSuccess: calling logout');
         logout();
         // Wait for return to login page.
         setTimeout(() => alert('Your session has timed out.'), 100);
       });
-      */
     }
-  }
-
-  function hashChange() {
-    const {hash} = location;
-    component = hashMap[hash];
-    authenticated = component && !unauthenticatedHashes.includes(hash);
-    if (!component) component = NotFound;
   }
 
   function logout() {
@@ -87,7 +81,7 @@
   }
 </script>
 
-<svelte:window on:hashchange={hashChange} />
+<svelte:window on:hashchange={() => (hash = location.hash)} />
 
 <main>
   <header>
@@ -95,7 +89,7 @@
       <a class="button" on:click={logout}>Logout</a>
       <a class="button" href="/#profile">Profile</a>
       <button on:click={deleteAccount}>Delete Account</button>
-      <button on:click={emailTest}>Email Test</button>
+      <button on:click={emailTest}>Send Email</button>
     {/if}
   </header>
 
@@ -105,17 +99,9 @@
     on:signUp={() => (location.href = '/#signUp')}
     on:success={handleSuccess} />
 
-  <Spinner />
-</main>
+  <div class="error">{message}</div>
 
-<style>
-  .button,
-  button {
-    background-color: lightblue;
-    border: solid blue 1px;
-    border-radius: 0.5rem;
-    color: blue;
-    padding: 0.5rem;
-    text-decoration: none;
-  }
-</style>
+  <Spinner />
+
+  <MessageDialog bind:dialog />
+</main>
