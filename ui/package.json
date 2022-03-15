@@ -27,7 +27,7 @@
     "@fortawesome/free-solid-svg-icons": "^5.14.0",
     "dialog-polyfill": "^0.5.1",
     "fa-svelte": "^3.1.0",
-    "lodash-es": "^4.17.15",
+    "lodash-es": "^4.17.21",
     "sirv-cli": "^0.4.4"
   }
 }
